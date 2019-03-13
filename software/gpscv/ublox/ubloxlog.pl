@@ -35,6 +35,7 @@
 # 16-05-2018 MJW Path fixups for consistency with other scripts
 # 02-11-2018 ELM Fix issues with uBlox constellation configuration
 # 30-11-2018 ELM Add options for tracking Galileo
+# 12-03-2019 TAL Add LEA-6T support
 
 use Time::HiRes qw( gettimeofday);
 use TFLibrary;
@@ -44,7 +45,7 @@ use POSIX qw(strftime);
 use vars  qw($tmask $opt_c $opt_r $opt_d $opt_h $opt_v);
 use Switch;
 
-$VERSION="0.1.3";
+$VERSION="0.1.4";
 $AUTHORS="Michael Wouters, Louis Marais";
 
 $OPENTTP=0;
@@ -632,22 +633,39 @@ sub ConfigureReceiver
 	SendCommand($msg);
 	
 	# Configure various messages for 1 Hz output
-	
-	# RXM-RAWX raw data message
-	$ubxmsgs .= "\x06\x01:";
-	$ubxmsgs .= "\x02\x15:";
-	$msg="\x06\x01\x03\x00\x02\x15\x01"; #CFG-MSG 0x02 0x15
-	SendCommand($msg);
+
+	if ($Init{"receiver:model"} eq "LEA-6T"){
+		Debug("Configuring RAW-RAW for a LEA-6T");
+		# RXM-RAW raw data message
+		$ubxmsgs .= "\x06\x01:";
+		$ubxmsgs .= "\x02\x10:";
+		$msg="\x06\x01\x03\x00\x02\x10\x01"; #CFG-MSG 0x02 0x10
+		SendCommand($msg);
+	} else {
+		# RXM-RAWX raw data message
+		$ubxmsgs .= "\x06\x01:";
+		$ubxmsgs .= "\x02\x15:";
+		$msg="\x06\x01\x03\x00\x02\x15\x01"; #CFG-MSG 0x02 0x15
+		SendCommand($msg);
+	}
 	
 	# TIM-TP time pulse message (contains sawtooth error)
 	$ubxmsgs .= "\x0d\x01:";
 	$msg="\x06\x01\x03\x00\x0d\x01\x01"; #CFG-MSG 0x0d 0x01
 	SendCommand($msg);
 	
-	# Satellite information
-	$ubxmsgs .= "\x01\x35:";
-	$msg="\x06\x01\x03\x00\x01\x35\x01"; #CFG-MSG 0x01 0x35
-	SendCommand($msg); 
+	if ($Init{"receiver:model"} eq "LEA-6T"){
+		Debug("Configuring NAV-SVINFO for a LEA-6T");
+		# Satellite information
+		$ubxmsgs .= "\x01\x30:";
+		$msg="\x06\x01\x03\x00\x01\x30\x01"; #CFG-MSG 0x01 0x30
+		SendCommand($msg);
+	} else {
+		# Satellite information
+		$ubxmsgs .= "\x01\x35:";
+		$msg="\x06\x01\x03\x00\x01\x35\x01"; #CFG-MSG 0x01 0x35
+		SendCommand($msg);
+	}
 	
 	# NAV-TIMEUTC UTC time solution 
 	$ubxmsgs .= "\x01\x21:";
@@ -663,11 +681,14 @@ sub ConfigureReceiver
 	$ubxmsgs .= "\x0b\x31:"; # GPS ephemeris
 	$ubxmsgs .= "\x0b\x02:"; # GPS UTC & ionosphere
 	$ubxmsgs .= "\x05\x00:\x05\01:"; # ACK-NAK, ACK_ACK
-	$ubxmsgs .= "\x27\x03:"; # Chip ID
-	
+	if ($Init{"receiver:model"} ne "LEA-6T"){
+		$ubxmsgs .= "\x27\x03:"; # Chip ID
+	}
+
 	PollVersionInfo();
-	PollChipID();
-	
+	if ($Init{"receiver:model"} ne "LEA-6T"){
+		PollChipID();
+	}
 	Debug("Done configuring");
 	
 } # ConfigureReceiver

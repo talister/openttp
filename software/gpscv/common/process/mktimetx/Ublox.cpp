@@ -72,6 +72,7 @@ typedef double         R8;
 #define MSG0122 0x02
 #define MSG0215 0x04
 #define MSG0D01 0x08
+#define MSG0210 0x10
 
 
 Ublox::Ublox(Antenna *ant,string m):Receiver(ant)
@@ -84,6 +85,8 @@ Ublox::Ublox(Antenna *ant,string m):Receiver(ant)
 	channels=32;
 	if (modelName == "LEA8MT"){
 		// For the future
+	}
+	else if (modelName == "LEA-6T"){
 	}
 	else if (modelName == "NEO8MT"){
 	}
@@ -131,7 +134,14 @@ bool Ublox::readLog(string fname,int mjd,int startTime,int stopTime,int rinexObs
 	gotIonoData=false;
 	
 	unsigned int currentMsgs=0;
-	unsigned int reqdMsgs =  MSG0121 | MSG0122 | MSG0215 | MSG0D01 ;
+	DBGMSG(debugStream,TRACE," model= " <<modelName);
+	unsigned int reqdMsgs =  0;
+	if (modelName == "LEA-6T"){
+		reqdMsgs =  MSG0121 | MSG0122 | MSG0D01 | MSG0210 ;
+	}
+	else{
+		reqdMsgs =  MSG0121 | MSG0122 | MSG0215 | MSG0D01 ;
+	}
 
   if (infile.is_open()){
     while ( getline (infile,line) ){
@@ -152,7 +162,7 @@ bool Ublox::readLog(string fname,int mjd,int startTime,int stopTime,int rinexObs
 			}
 			
 			// The 0x0215 message starts each second
-			if(msgid == "0215"){ // raw measurements 
+			if(msgid == "0215" ){ // raw measurements
 				
 				int nGPS=0;
 				int nBeidou=0;
@@ -291,8 +301,136 @@ bool Ublox::readLog(string fname,int mjd,int startTime,int stopTime,int rinexObs
 				
 				continue;
 				
-			} // raw measurements
-			
+			} // end 0x215 raw measurements
+			// The 0x0210 message starts each second
+			if(msgid == "0210"){ // raw measurements
+
+				int nGPS=0;
+
+				if (currentMsgs == reqdMsgs){ // save the measurements from the previous second
+					if (svmeas.size() > 0){
+						ReceiverMeasurement *rmeas = new ReceiverMeasurement();
+						measurements.push_back(rmeas);
+
+						rmeas->sawtooth=sawtooth*1.0E-12; // units are ps, must be added to TIC measurement
+						rmeas->timeOffset=clockBias*1.0E-9; // units are ns WARNING no sign convention defined yet ...
+
+						int pchh,pcmm,pcss;
+						if ((3==sscanf(pctime.c_str(),"%d:%d:%d",&pchh,&pcmm,&pcss))){
+							rmeas->pchh=pchh;
+							rmeas->pcmm=pcmm;
+							rmeas->pcss=pcss;
+						}
+
+						// GPSTOW is used for pseudorange estimations
+						// note: this is rounded because measurements are interpolated on a 1s grid
+						rmeas->gpstow=rint(measTOW);
+						rmeas->gpswn=measGPSWN % 1024; // Converted to truncated WN. Not currently used
+
+						// UTC time of measurement
+						// We could use other time information to calculate this eg gpstow,gpswn and leap seconds
+						rmeas->tmUTC.tm_sec=UTCsec;
+						rmeas->tmUTC.tm_min=UTCmin;
+						rmeas->tmUTC.tm_hour=UTChour;
+						rmeas->tmUTC.tm_mday=UTCday;
+						rmeas->tmUTC.tm_mon=UTCmon-1;
+						rmeas->tmUTC.tm_year=UTCyear-1900;
+						rmeas->tmUTC.tm_isdst=0;
+
+						// Calculate GPS time of measurement
+						// FIXME why do this ? why not just convert from UTC ? and full WN is known anyway
+						time_t tgps = GPS::GPStoUnix(rmeas->gpstow,rmeas->gpswn,app->referenceTime());
+						struct tm *tmGPS = gmtime(&tgps);
+						rmeas->tmGPS=*tmGPS;
+
+						//rmeas->tmfracs = measTOW - (int)(measTOW);
+						//if (rmeas->tmfracs > 0.5) rmeas->tmfracs -= 1.0; // place in the previous second
+
+						rmeas->tmfracs=0.0;
+
+						// Need to add some logic here for determining if a measurement is selected...
+						// I removed tha logic for testing, but it may not work if a datafile is mismatched
+						// the configuration.
+
+						//if (constellations & GNSSSystem::GPS){
+							for (unsigned int sv=0;sv<svmeas.size();sv++){
+								svmeas.at(sv)->dbuf3 = svmeas.at(sv)->meas; // save for debugging
+								svmeas.at(sv)->meas -= clockBias*1.0E-9; // evidently it is subtracted
+								// Now subtract the ms part so that ms ambiguity resolution works:
+								// Need to obtain ephemeris, etc. for other GNSS to do proper ms ambiguity
+								// resolution. We could only keep the ms part, but for now only do this for
+								// GPS because we do get the necessary data for GPS from the ublox.
+								if(svmeas.at(sv)->constellation == GNSSSystem::GPS){
+									svmeas.at(sv)->meas -= 1.0E-3*floor(svmeas.at(sv)->meas/1.0E-3);
+								}
+								svmeas.at(sv)->rm=rmeas;
+							}
+							rmeas->meas=svmeas;
+							svmeas.clear(); // don't delete - we only made a shallow copy!
+						//}
+
+
+						// KEEP THIS it's useful for debugging measurement-time related problems
+					//fprintf(stderr,"PC=%02d:%02d:%02d tmUTC=%02d:%02d:%02d tmGPS=%4d %02d:%02d:%02d gpstow=%d gpswn=%d measTOW=%.12lf tmfracs=%g clockbias=%g\n",
+					//	pchh,pcmm,pcss,UTChour,UTCmin,UTCsec, rmeas->tmGPS.tm_year+1900,rmeas->tmGPS.tm_hour, rmeas->tmGPS.tm_min,rmeas->tmGPS.tm_sec,
+					//	(int) rmeas->gpstow,(int) rmeas->gpswn,measTOW,rmeas->tmfracs,clockBias*1.0E-9  );
+
+					//fprintf(stderr,"%02d:%02d:%02d %02d:%02d:%02d %02d:%02d:%02d %d %d %.12lf %g %g\n",
+					//pchh,pcmm,pcss,UTChour,UTCmin,UTCsec, rmeas->tmGPS.tm_hour, rmeas->tmGPS.tm_min,rmeas->tmGPS.tm_sec,
+					//(int) rmeas->gpstow,(int) rmeas->gpswn,measTOW,rmeas->tmfracs,clockBias*1.0E-9  );
+
+					}// if (gpsmeas.size() > 0)
+				}
+				else{
+					DBGMSG(debugStream,TRACE,pctime << " reqd message missing, flags = " << currentMsgs);
+					deleteMeasurements(svmeas);
+				}
+
+				pctime=currpctime;
+				currentMsgs = 0;
+
+				if (msg.size()-8-24*1 > 0){ // don't know the expected message size yet but if we've got the header ...
+					HexToBin((char *) msg.substr(6*2,2*sizeof(U1)).c_str(),sizeof(U1),(unsigned char *) &u1buf);
+					unsigned int nmeas=u1buf;
+					DBGMSG(debugStream,TRACE,"nmeas=" << nmeas);
+					if (msg.size() == (2+8+nmeas*24)*2){
+						HexToBin((char *) msg.substr(0*2,2*sizeof(I4)).c_str(),sizeof(I4),(unsigned char *) &measTOW); //measurement TOW (ms)
+						HexToBin((char *) msg.substr(4*2,2*sizeof(I2)).c_str(),sizeof(I2),(unsigned char *) &measGPSWN); // full WN
+						DBGMSG(debugStream,TRACE,currpctime << " meas tow=" << (int) measTOW  << " gps wn=" << (int) measGPSWN);
+						for (unsigned int m=0;m<nmeas;m++){
+							int gnssSys = 0;
+							gnssSys=GNSSSystem::GPS;
+							if (gnssSys & constellations ){
+								// Since we get all the measurements in one message (which starts each second) there's no need to check for multiple measurement messages
+								// like with eg the Resolution T
+								HexToBin((char *) msg.substr((16+24*m)*2,2*sizeof(R8)).c_str(),sizeof(R8),(unsigned char *) &r8buf); //pseudorange (m)
+								HexToBin((char *) msg.substr((28+24*m)*2,2*sizeof(U1)).c_str(),sizeof(U1),(unsigned char *) &u1buf); //svid
+								int svID=u1buf;
+								HexToBin((char *) msg.substr((29+24*m)*2,2*sizeof(I1)).c_str(),sizeof(I1),(unsigned char *) &u1buf);
+								int trkStat=u1buf;
+								// When PR is reported, trkStat is always 1 but .
+								if (trkStat > 0 && r8buf/CLIGHT < 1.0 && svID != 255){ // svid=255 is unknown GLONASS
+									SVMeasurement *svm = new SVMeasurement(svID,gnssSys,GNSSSystem::C1,r8buf/CLIGHT,NULL);
+									svm->dbuf1=3.0; // used fixed value
+									svmeas.push_back(svm);
+								}
+								DBGMSG(debugStream,TRACE,"SYS " <<gnssSys << " SV" << svID << " pr=" << r8buf/CLIGHT << setprecision(8) << " trkStat= " << (int) trkStat);
+							}
+						}
+						currentMsgs |= MSG0210;
+					}
+					else{
+						DBGMSG(debugStream,WARNING,"Bad 0210 message size");
+					}
+				}
+				else{
+					DBGMSG(debugStream,WARNING,"empty/malformed 0210 message");
+				}
+
+				continue;
+
+			} // end 0x0210 raw measurements
+
 			// 0x0D01 Timepulse time data (sawtooth correction)
 			if(msgid == "0d01"){
 				

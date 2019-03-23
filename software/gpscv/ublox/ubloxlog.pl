@@ -4,17 +4,17 @@
 # The MIT License (MIT)
 #
 # Copyright (c) 2016-2018 Michael J. Wouters
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -25,7 +25,7 @@
 
 # ubloxlog - Perl script to configure ublox GNSS receivers and download data
 
-# Modification history:					
+# Modification history:
 # 02-05-2016 MJW First version, derived restlog.pl
 # 27-02-2017 MJW Minor cleanups for configuration path
 # 16-02-2017 MJW uucp lock file from config
@@ -56,7 +56,7 @@ $REMOVE_SV_THRESHOLD=600; #interval after which  a SV marked as disappeared is r
 $COLDSTART_HOLDOFF = 0;
 $EPHEMERIS_POLL_INTERVAL=7000; # a bit less than the 7200 s threshold for
 															 # ephemeris validity as used in processing S/W
-															 
+
 # Track each SV so that we know when to ask for an ephemeris
 # Record SVN
 # Record time SV appeared (Unix time)
@@ -88,7 +88,7 @@ $0=~s#.*/##;
 $home=$ENV{HOME};
 $configFile="$home/etc/gpscv.conf";
 
-if( !(getopts('c:dhrv')) || ($#ARGV>=1) || $opt_h){ 
+if( !(getopts('c:dhrv')) || ($#ARGV>=1) || $opt_h){
   ShowHelp();
   exit;
 }
@@ -101,11 +101,11 @@ if ($opt_v){
 
 if (!(-d "$home/etc"))  {
   ErrorExit("No ~/etc directory found!\n");
-} 
+}
 
 if (-d "$home/logs"){
   $logPath="$home/logs";
-} 
+}
 else{
   ErrorExit("No ~/logs directory found!\n");
 }
@@ -161,10 +161,12 @@ unless (`/usr/local/bin/lockport -d $uucpLockPath $port $0`==1) {
 	exit;
 }
 
+Debug("Trying to open Port $port to Rx");
+
 $rx=&TFConnectSerial($port,
 		(ispeed=>0010002,ospeed=>0010002,iflag=>IGNBRK,
 			oflag=>0,lflag=>0,cflag=>CS8|CREAD|HUPCL|CLOCAL));
-			
+
 # Set up a mask which specifies this port for select polling later on
 vec($rxmask,fileno $rx,1)=1;
 Debug("Port $port to Rx is open");
@@ -205,7 +207,7 @@ $receiverTimeout=600;
 $configReceiverTimeout=$Init{"receiver:timeout"};
 if (defined($configReceiverTimeout)){$receiverTimeout=$configReceiverTimeout;}
 
-$lastMsg=time(); 
+$lastMsg=time();
 
 LOOP: while (!$killed)
 {
@@ -221,17 +223,17 @@ LOOP: while (!$killed)
 		}
 		goto BYEBYE;
 	}
-  
+
 	# Wait for input
 	$nfound=select $tmask=$rxmask,undef,undef,0.2;
 	next unless $nfound;
-	
+
 	if ($nfound<0) {$killed=1; last}
-	
+
 	# Read the new input and append it to $input
-	sysread $rx,$currinput,$nfound;			
+	sysread $rx,$currinput,$nfound;
 	$input .= $currinput;
-	
+
 	# Look for a message in what we've accumulated
 	# $`=pre-match string, $&=match string, $'=post-match string (Camel book p128)
 
@@ -239,27 +241,27 @@ LOOP: while (!$killed)
 	#	$input=$'; # save the dangly bits
 	#	print $1,$2,"\n";
 	#}
-	
-	# Header structure for UBX packets is 
+
+	# Header structure for UBX packets is
 	# Sync char 1 | Sync char 2| Class (1 byte) | ID (1 byte) | payload length (2 bytes) | payload | cksum_a | cksum_b
-	
+
 	if ($input=~ /\xb5\x62(..)(..)([\s\S]*)/) { # if we've got a UBX header
 		$input=$&; # chuck away the prematch part
 		$classid=$1;
 		$payloadLength = unpack("v",$2);
 		$data = $3;
-		
+
 		# Have we got the full message ?
 		$packetLength = $payloadLength + 8;
 		$inputLength=length($input);
 		if ($packetLength <= $inputLength){ # it's all there ! yay !
-			
+
 			$now=time();			# got one - tag the time
 			$lastMsg=$now;
-			
+
 			if ($now>=$next){
 				# (this way is safer than just incrementing $mjd)
-				$mjd=int($now/86400) + 40587;	
+				$mjd=int($now/86400) + 40587;
 				&OpenDataFile($mjd,0);
 				# Request receiver and software versions
 				# TODO ELM Does PollVersionInfo do this? It looks like it does.
@@ -267,14 +269,14 @@ LOOP: while (!$killed)
 				PollChipID();
 				$next=($mjd-40587+1)*86400;	# seconds at next MJD
 			}
-			
+
 			if ($now>$then) {
 				# Update string version of time stamp
 				@_=gmtime $now;
 				$nowstr=sprintf "%02d:%02d:%02d",$_[2],$_[1],$_[0];
 				$then=$now;
 			}
-			
+
 			if ( $ubxmsgs =~ /:$classid:/){ # we want this one
 				($class,$id)=unpack("CC",$classid);
 				#printf "%02x%02x $nowstr %i %i %i\n",$class,$id,$payloadLength,$packetLength,$inputLength;
@@ -290,12 +292,12 @@ LOOP: while (!$killed)
 						Debug('Bad checksum')
 					}
 				}
-				
+
 				if ($class == 0x01 && $id == 0x22){ # last of periodic messages is the clock solution
 					UpdateUTCIonoParameters();
 					UpdateGPSEphemeris();
 				}
-				
+
 				if ($class == 0x0b){
 					&ParseGPSSystemDataMessage($id,$payloadLength,$data);
 				}
@@ -318,11 +320,11 @@ LOOP: while (!$killed)
 			# nuffink
 		}
 	}
-	
+
 	if ($fileFormat == $NATIVE){
 		print OUT $currinput;
 	}
-	
+
 }
 
 BYEBYE:
@@ -341,7 +343,7 @@ if ($fileFormat == $OPENTTP){
 	select STDOUT;
 }
 
-# end of main 
+# end of main
 
 #-----------------------------------------------------------------------------
 sub ShowHelp
@@ -365,20 +367,20 @@ sub ErrorExit {
 }
 
 #----------------------------------------------------------------------------
-sub Initialise 
+sub Initialise
 {
   my $name=shift;
 	@required=( "paths:receiver data","receiver:file extension","receiver:port","receiver:status file",
 		"receiver:pps offset","receiver:lock file");
 	%Init=&TFMakeHash2($name,(tolower=>1));
-	
+
 	if (!%Init){
 		print "Couldn't open $name\n";
 		exit;
 	}
-  
+
 	my $err;
-  
+
 	# Check that all required information is present
 	$err=0;
 	foreach (@required) {
@@ -388,7 +390,7 @@ sub Initialise
 		}
 	}
 	exit if $err;
-	
+
 }# Initialise
 
 
@@ -408,23 +410,23 @@ sub OpenDataFile
 	# Fixup path and extension if needed
 
 	my $ext=$Init{"receiver:file extension"};
-	
+
 	my $name=$Init{"paths:receiver data"}.$mjd.$ext;
 	my $old=(-e $name); # already there ? May have restarted logging.
 
 	Debug("Opening $name");
 
 	open OUT,">>$name" or die "Could not write to $name";
-	
+
 	if ($fileFormat == $OPENTTP){
 		select OUT;
 	}
 	elsif ($fileFormat == $NATIVE){
 		binmode OUT;
 	}
-	
+
 	$|=1;
-	
+
 	if ($fileFormat == $OPENTTP){
 		printf "# %s $0 (version $VERSION) %s\n",
 		&TFTimeStamp(),($_[1]? "beginning" : "continuing");
@@ -443,7 +445,7 @@ sub Checksum
 	my $cka=0;
 	my $ckb=0;
 	my $i;
-	
+
 	for ($i=0;$i<=$#cmsg;$i++){
 		$cka = $cka + $cmsg[$i];
 		$ckb = $ckb + $cka;
@@ -458,7 +460,7 @@ sub SendCommand
 {
   my $cmd=shift;
   my $cksum=Checksum($cmd);
-  print $rx "\xb5\x62".$cmd.$cksum;	
+  print $rx "\xb5\x62".$cmd.$cksum;
 } # SendCommand
 
 #----------------------------------------------------------------------------
@@ -466,7 +468,7 @@ sub ConfigureReceiver
 {
 
 	# Note that reset causes a USB disconnect
-	# so it's a good idea to use udev to map the device to a 
+	# so it's a good idea to use udev to map the device to a
 	# fixed name
 	if ($opt_r){ # hard reset
 		Debug("Resetting");
@@ -474,9 +476,9 @@ sub ConfigureReceiver
 		SendCommand($msg);
 		sleep 5;
 	}
-	
+
 	Debug("Configuring receiver");
-	
+
 	my $observations = 'gps'; # default is GPS
 	# Valid combinations for the ublox 8 LEA 8MT are
 	# GPS, Galileo
@@ -487,8 +489,8 @@ sub ConfigureReceiver
 	# Galileo, GLONASS
 	# Galileo, BeiDou
 	# GLONASS, BeiDou
-	# SBAS, QZSS can only be enabled with GPS enabled 
-	
+	# SBAS, QZSS can only be enabled with GPS enabled
+
 	# The following are supported (all tested, support for Galileo added 2018-11-30):
 	# GPS
 	# GPS, GLONASS
@@ -502,26 +504,26 @@ sub ConfigureReceiver
 	# GLONASS, Galileo
 	# Beidou, Galileo
 	# Galileo
-	
+
 	# 2018-11-02 Notes: (ELM, after much testing and fixing some bugs)
-	# 1. If invalid config is sent, the default config is loaded, that is 
+	# 1. If invalid config is sent, the default config is loaded, that is
 	#    GPS (8 - 16 channels), QZSS (0 - 3 channels), GLONASS (8 - 14 channels)
 	# 2. Even if a valid config is sent, there has to be enough channels available
-	#    for it to execute. With the default config there is only 16 channels 
+	#    for it to execute. With the default config there is only 16 channels
 	#    available, so trying to enable GPS and Beidou with min = 16 channels each
-	#    does not work. I changed the min to 8 below. Remember there are 72 
+	#    does not work. I changed the min to 8 below. Remember there are 72
 	#    channels, but only 32 is for user tracking.
-	# 3. A valid config message will not be accepted if there are not enough 
+	# 3. A valid config message will not be accepted if there are not enough
 	#    channels available. It's best to send a complete config message, i.e.
 	#    include ALL constellations, disabling the ones you do not want/need.
 	# 4. This has now been tested with all valid combinations currently supported.
 	#    It should be easy to update the code below to enable other constellations,
 	#    just keep in mind that some combinations are not valid. Refer to the table
 	#    under the default for observations above.
-	
+
 	if (defined($Init{"receiver:observations"})){
 		$observations=lc $Init{"receiver:observations"};
-		
+
 		# WARNING! Only a few (useful) combinations are supported here (no SBAS, IMES or QZSS)
 		my $ngnss = 0; # number of GNSS systems enabled
 		my $enabled = ""; # string to hold gnss systems to enable. This prevents invalid combinations.
@@ -535,7 +537,7 @@ sub ConfigureReceiver
 				if($observations =~ /glonass/){
 					$ngnss++;
 					$enabled .= "glonass ";
-				} 
+				}
 				elsif ($observations =~ /beidou/){
 					$ngnss++;
 					$enabled .= "beidou ";
@@ -550,13 +552,13 @@ sub ConfigureReceiver
 				$enabled .= "beidou ";
 			}
 		}
-		elsif ($observations =~ /glonass/){ # GLONASS combos 
+		elsif ($observations =~ /glonass/){ # GLONASS combos
 			$ngnss=1;
 			$enabled .= "glonass ";
 			if ($observations =~ /beidou/){
 				$ngnss++;
 				$enabled .= "beidou ";
-			} 
+			}
 			elsif ($observations =~ /galileo/){
 				$ngnss++;
 				$enabled .= "galileo ";
@@ -577,10 +579,10 @@ sub ConfigureReceiver
 		if ($ngnss == 0){
 			ErrorExit("Problem with receiver:observations: no valid GNSS systems were found");
 		}
-		
+
 		$msgSize=pack('v',4+8*7); # little-endian, 16 bits unsigned
 		$numConfigBlocks=pack('C',7);
-		
+
 		my $cfg = "\x06\x3e$msgSize\x00\xff\xff$numConfigBlocks";
 		my $en = 0;
 		# GPS
@@ -597,16 +599,16 @@ sub ConfigureReceiver
 		if($enabled =~ /galileo/) { $en = 1; } else { $en = 0; }
 		$cfg .= ConfigGNSS('galileo',4,10,$en); # ...,4,8,0); <-- default in u-center
 		                                        # Very important: The max number of channels that
-		                                        # can be allocated to Galileo is 10 - see page 
-		                                        # 13 of 394 in u-blox M 8 receiver description 
+		                                        # can be allocated to Galileo is 10 - see page
+		                                        # 13 of 394 in u-blox M 8 receiver description
 		                                        # manual (part no: UBX-13003221 - R16). The pain
-		                                        # is that the receiver will allow you to configure 
+		                                        # is that the receiver will allow you to configure
 		                                        # more channels but then will NOT allow you to
 		                                        # enable Galileo. It took a few DAYS to find this
 		                                        # little gem!
 		# Beidou
 		if($enabled =~ /beidou/) { $en = 1; } else { $en = 0; }
-		$cfg .= ConfigGNSS('beidou',8,24,$en);	
+		$cfg .= ConfigGNSS('beidou',8,24,$en);
 		# IMES
 		$cfg .= ConfigGNSS('imes',0,8,0);
 		# QZSS
@@ -614,38 +616,38 @@ sub ConfigureReceiver
 		# GLONASS
 		if ($enabled =~ /glonass/) { $en = 1 } else { $en = 0; }
 		$cfg .= ConfigGNSS('glonass',12,16,$en);
-		
+
 		SendCommand($cfg);
-	
+
 		# Cold start is recommended after GNSS reconfiguration
 		# This doesn't scrub the GNSS selection
 		Debug("Restarting after GNSS reconfiguration");
 		$msg="\x06\x04\x04\x00\xff\xff\x00\x00";
 		SendCommand($msg);
-		
+
 		close $rx;
-		
+
 		sleep 30;
-		
+
 		# We get a disconnect on reset so have have to close the serial port
 		# and reopen it
-	
+
 		Debug("Opening again");
 		$rx=&TFConnectSerial($port, (ispeed=>0010002,ospeed=>0010002,iflag=>IGNBRK,
 			oflag=>0,lflag=>0,cflag=>CS8|CREAD|HUPCL|CLOCAL));
-		
+
 		# No need to update the locks
-		
+
   }
-  
+
   Debug("Configuring");
   SendCommand('\x06\x3e\x00\x00'); # Get the new configuration
-  
+
 	# Navigation/measurement rate settings
 	$ubxmsgs .= "\x06\x08:";
 	$msg = "\x06\x08\x06\x00\xe8\x03\x01\x00\x01\x00"; # CFG_RATE
 	SendCommand($msg);
-	
+
 	# Configure various messages for 1 Hz output
 
 	if ($Init{"receiver:model"} eq "LEA-6T"){
@@ -662,12 +664,12 @@ sub ConfigureReceiver
 		$msg="\x06\x01\x03\x00\x02\x15\x01"; #CFG-MSG 0x02 0x15
 		SendCommand($msg);
 	}
-	
+
 	# TIM-TP time pulse message (contains sawtooth error)
 	$ubxmsgs .= "\x0d\x01:";
 	$msg="\x06\x01\x03\x00\x0d\x01\x01"; #CFG-MSG 0x0d 0x01
 	SendCommand($msg);
-	
+
 	if ($Init{"receiver:model"} eq "LEA-6T"){
 		Debug("Configuring NAV-SVINFO for a LEA-6T");
 		# Satellite information
@@ -680,17 +682,17 @@ sub ConfigureReceiver
 		$msg="\x06\x01\x03\x00\x01\x35\x01"; #CFG-MSG 0x01 0x35
 		SendCommand($msg);
 	}
-	
-	# NAV-TIMEUTC UTC time solution 
+
+	# NAV-TIMEUTC UTC time solution
 	$ubxmsgs .= "\x01\x21:";
 	$msg="\x06\x01\x03\x00\x01\x21\x01"; #CFG-MSG 0x01 0x21
-	SendCommand($msg); 
-	
+	SendCommand($msg);
+
 	# NAV-CLOCK clock solution (contains clock bias)
 	$ubxmsgs .= "\x01\x22:";
 	$msg="\x06\x01\x03\x00\x01\x22\x01"; #CFG-MSG 0x01 0x22
-	SendCommand($msg); 
-	
+	SendCommand($msg);
+
 	# Polled messages
 	if ($rxFamily < 9){
 		$ubxmsgs .= "\x0b\x31:"; # GPS ephemeris
@@ -706,7 +708,7 @@ sub ConfigureReceiver
 		PollChipID();
 	}
 	Debug("Done configuring");
-	
+
 } # ConfigureReceiver
 
 # ---------------------------------------------------------------------------
@@ -727,7 +729,7 @@ sub PollChipID
 # ---------------------------------------------------------------------------
 sub PollGPSEphemeris
 {
- 
+
   ($svID)=pack("C",shift);
 	my $msg="\x0b\x31\x01\x00$svID";
 	SendCommand($msg);
@@ -746,7 +748,7 @@ sub UpdateGPSEphemeris
 	if ($rxFamily == 9){
 		return;
 	}
-	
+
 	for ($i=0;$i<=$#SVdata;$i++){
 		if ($SVdata[$i][$LAST_EPHEMERIS_REQUESTED] ==-1 &&
 			time - $tstart > $COLDSTART_HOLDOFF ){ #flags start up for SV
@@ -755,7 +757,7 @@ sub UpdateGPSEphemeris
 			Debug("Requesting ephemeris for $SVdata[$i][$SVN]");
 			PollGPSEphemeris($SVdata[$i][$SVN]);
 		}
-		elsif (time - $SVdata[$i][$LAST_EPHEMERIS_REQUESTED] > 30 && 
+		elsif (time - $SVdata[$i][$LAST_EPHEMERIS_REQUESTED] > 30 &&
 			$SVdata[$i][$LAST_EPHEMERIS_REQUESTED] > $SVdata[$i][$LAST_EPHEMERIS_RECEIVED] ){
 				$SVdata[$i][$LAST_EPHEMERIS_REQUESTED] = time;
 			Debug("Requesting ephemeris for $SVdata[$i][$SVN] again!");
@@ -768,7 +770,7 @@ sub UpdateGPSEphemeris
 			PollGPSEphemeris($SVdata[$i][$SVN]);
 		}
 	}
-	
+
 }
 
 # ----------------------------------------------------------------------------
@@ -777,8 +779,8 @@ sub UpdateUTCIonoParameters
 	if ($rxFamily == 9){
 		return;
 	}
-	
-	if ($params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED] == -1 && 
+
+	if ($params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED] == -1 &&
 		time - $tstart > $COLDSTART_HOLDOFF){
 		# Just starting so do this ASAP
 		$params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED]= time;
@@ -786,7 +788,7 @@ sub UpdateUTCIonoParameters
 		PollUTCIonoParameters();
 	}
 	elsif (time - $params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED] > 30 &&
-		$params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED] > 
+		$params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED] >
 			$params[$UTC_IONO_PARAMETERS][$LAST_RECEIVED]){
 		# Polled but no response
 		$params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED]= time;
@@ -805,7 +807,7 @@ sub UpdateUTCIonoParameters
 # ---------------------------------------------------------------------------
 sub UpdateSVInfo
 {
-	# Uses 0x01 0x35 message 
+	# Uses 0x01 0x35 message
 	# This is used to track SVs as they appear and disappear so that we know
 	# when to request a new ephemeris
 	# Flags whether the list was updated
@@ -815,15 +817,15 @@ sub UpdateSVInfo
 	my $i;
 	my ($cno,$azim,$prRes,$nowstr,$elev);
 	my $satsUpdated = 0;
-	
+
 	# Mark all SVs as not visible so that non-visible SVs can be pruned
 	for ($i=0;$i<=$#SVdata;$i++){
 		$SVdata[$i][$STILL_VISIBLE]=0;
 	}
-	
+
 	#($iTOW,$ver,$numSVs) = unpack("ICC",$data);
 	#Debug("numSVs = $numSVs");
-	
+
 	for ($i=0;$i<$numSVs;$i++){
 		($gnssID,$svID,$cno,$elev,$azim,$prRes,$flags)=unpack("CCCcssI",substr $data,8+12*$i,12);
 		$ephAvail=$flags & 0x0800;
@@ -850,7 +852,7 @@ sub UpdateSVInfo
 			$satsUpdated=1;
 		}
 	}
-	
+
 	# Now prune satellites which have disappeared
 	# This is only done if the satellite has not been
 	# visible for some time - satellites can drop in and out of
@@ -862,14 +864,14 @@ sub UpdateSVInfo
 				Debug("$SVdata[$i][$SVN] has disappeared");
 				$satsUpdated=1;
 			}
-			elsif (time - $SVdata[$i][$DISAPPEARED] > $REMOVE_SV_THRESHOLD){	
+			elsif (time - $SVdata[$i][$DISAPPEARED] > $REMOVE_SV_THRESHOLD){
 				Debug("$SVdata[$i][$SVN] removed");
 				splice @SVdata,$i,1;
 				$satsUpdated=1;
-			}	
+			}
 		}
 	}
-	
+
 	return $satsUpdated;
 }
 
@@ -887,13 +889,13 @@ sub UpdateStatus
 		print STA "\n";
 	close STA;
 }
-			
+
 # ---------------------------------------------------------------------------
 sub ParseGPSSystemDataMessage()
 {
 	my ($id,$payloadLength,$data) = @_;
 	if ($id == 0x31){ # ephemeris
-		my ($svn) = unpack("I",$data); 
+		my ($svn) = unpack("I",$data);
 		if ($payloadLength == 104){
 			Debug("Got ephemeris for $svn");
 			for ($i=0;$i<=$#SVdata;$i++){
@@ -972,7 +974,7 @@ sub CheckSumOK
 	my $cka=0;
 	my $ckb=0;
 	my $l = length($str);
-	for (my $i=2;$i<$l-2;$i++){ # skip the two bytes of the header (start) and the checksum (end) 
+	for (my $i=2;$i<$l-2;$i++){ # skip the two bytes of the header (start) and the checksum (end)
 		$cka = $cka + ord($msg[$i]);
 		$cka = $cka & 0xff;
 		$ckb = $ckb + $cka;

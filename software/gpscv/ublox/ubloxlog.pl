@@ -23,7 +23,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# ubloxlog - Perl script to configure ublox LEA8MT GNSS receivers and download data
+# ubloxlog - Perl script to configure ublox GNSS receivers and download data
 
 # Modification history:					
 # 02-05-2016 MJW First version, derived restlog.pl
@@ -35,6 +35,7 @@
 # 16-05-2018 MJW Path fixups for consistency with other scripts
 # 02-11-2018 ELM Fix issues with uBlox constellation configuration
 # 30-11-2018 ELM Add options for tracking Galileo
+# 31-01-2019 MJW Kludges for ublox9 family
 # 12-03-2019 TAL Add LEA-6T support
 
 use Time::HiRes qw( gettimeofday);
@@ -45,7 +46,7 @@ use POSIX qw(strftime);
 use vars  qw($tmask $opt_c $opt_r $opt_d $opt_h $opt_v);
 use Switch;
 
-$VERSION="0.1.4";
+$VERSION="0.2.1";
 $AUTHORS="Michael Wouters, Louis Marais";
 
 $OPENTTP=0;
@@ -79,6 +80,8 @@ $UTC_IONO_PARAMETERS= 0;
 #Initialise parameters
 $params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED]=-1;
 $params[$UTC_IONO_PARAMETERS][$LAST_RECEIVED]=-1;
+
+$rxFamily=8; # ublox receiver family (currently 8 and 9 only supported)
 
 $0=~s#.*/##;
 
@@ -130,6 +133,12 @@ if (!(-e $configFile)){
 $ubxmsgs=":";
 &Initialise($configFile);
 
+if (defined $Init{"receiver:model"}){
+	$rxmodel = lc $Init{"receiver:model"};
+	if  ($rxmodel =~ /zed-f9/){
+		$rxFamily = 9;
+	}
+}
 
 # Check for an existing lock file
 $lockFile = TFMakeAbsoluteFilePath($Init{"receiver:lock file"},$home,$logPath);
@@ -576,7 +585,12 @@ sub ConfigureReceiver
 		my $en = 0;
 		# GPS
 		if($enabled =~ /gps/) { $en = 1; } else { $en = 0; }
-		$cfg .= ConfigGNSS('gps',8,16,$en);
+		if ($rxFamily == 8){
+			$cfg .= ConfigGNSS('gps',8,16,$en);
+		}
+		elsif ($rxFamily == 9){
+			$cfg .= ConfigGNSS('gps',16,32,$en);
+		}
 		# SBAS
 		$cfg .= ConfigGNSS('sbas',1,3,0);
 		# Galileo
@@ -678,8 +692,10 @@ sub ConfigureReceiver
 	SendCommand($msg); 
 	
 	# Polled messages
-	$ubxmsgs .= "\x0b\x31:"; # GPS ephemeris
-	$ubxmsgs .= "\x0b\x02:"; # GPS UTC & ionosphere
+	if ($rxFamily < 9){
+		$ubxmsgs .= "\x0b\x31:"; # GPS ephemeris
+		$ubxmsgs .= "\x0b\x02:"; # GPS UTC & ionosphere
+	}
 	$ubxmsgs .= "\x05\x00:\x05\01:"; # ACK-NAK, ACK_ACK
 	if ($Init{"receiver:model"} ne "LEA-6T"){
 		$ubxmsgs .= "\x27\x03:"; # Chip ID
@@ -727,6 +743,10 @@ sub PollUTCIonoParameters
 # Poll for ephemeris if a poll is due
 sub UpdateGPSEphemeris
 {
+	if ($rxFamily == 9){
+		return;
+	}
+	
 	for ($i=0;$i<=$#SVdata;$i++){
 		if ($SVdata[$i][$LAST_EPHEMERIS_REQUESTED] ==-1 &&
 			time - $tstart > $COLDSTART_HOLDOFF ){ #flags start up for SV
@@ -754,6 +774,9 @@ sub UpdateGPSEphemeris
 # ----------------------------------------------------------------------------
 sub UpdateUTCIonoParameters
 {
+	if ($rxFamily == 9){
+		return;
+	}
 	
 	if ($params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED] == -1 && 
 		time - $tstart > $COLDSTART_HOLDOFF){

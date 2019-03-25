@@ -88,6 +88,7 @@ Ublox::Ublox(Antenna *ant,string m):Receiver(ant)
 	}
 	else if (modelName == "LEA-6T"){
 		channels=50;
+		constellations=GNSSSystem::GPS;
 	}
 	else if (modelName == "NEO-M8T"){
 	}
@@ -117,6 +118,7 @@ bool Ublox::readLog(string fname,int mjd,int startTime,int stopTime,int rinexObs
 	
 	I4 sawtooth;
 	I4 clockBias;
+	I4 intTOW;
 	R8 measTOW;
 	U2 measGPSWN;
 	I1 measLeapSecs;
@@ -405,9 +407,10 @@ bool Ublox::readLog(string fname,int mjd,int startTime,int stopTime,int rinexObs
 					unsigned int nmeas=u1buf;
 					DBGMSG(debugStream,TRACE,"nmeas=" << nmeas);
 					if (msg.size() == (2+8+nmeas*24)*2){
-						HexToBin((char *) msg.substr(0*2,2*sizeof(I4)).c_str(),sizeof(I4),(unsigned char *) &measTOW); //measurement TOW (ms)
+						HexToBin((char *) msg.substr(0*2,2*sizeof(I4)).c_str(),sizeof(I4),(unsigned char *) &intTOW); //measurement TOW (ms)
+						measTOW = (float) intTOW / 1000.0f;
 						HexToBin((char *) msg.substr(4*2,2*sizeof(I2)).c_str(),sizeof(I2),(unsigned char *) &measGPSWN); // full WN
-						DBGMSG(debugStream,TRACE,currpctime << " meas tow=" << (int) measTOW  << " gps wn=" << (int) measGPSWN);
+						DBGMSG(debugStream,TRACE,currpctime << " int tow=" << intTOW << " meas tow=" << (int) measTOW  << " gps wn=" << (int) measGPSWN);
 						for (unsigned int m=0;m<nmeas;m++){
 							int gnssSys = 0;
 							gnssSys=GNSSSystem::GPS;

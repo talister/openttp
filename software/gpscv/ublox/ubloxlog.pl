@@ -81,7 +81,7 @@ $UTC_IONO_PARAMETERS= 0;
 $params[$UTC_IONO_PARAMETERS][$LAST_REQUESTED]=-1;
 $params[$UTC_IONO_PARAMETERS][$LAST_RECEIVED]=-1;
 
-$rxFamily=8; # ublox receiver family (currently 8 and 9 only supported)
+$rxFamily=8; # ublox receiver family (currently 6, 8 and 9 supported)
 
 $0=~s#.*/##;
 
@@ -137,6 +137,9 @@ if (defined $Init{"receiver:model"}){
 	$rxmodel = lc $Init{"receiver:model"};
 	if  ($rxmodel =~ /zed-f9/){
 		$rxFamily = 9;
+	}
+	elsif ($rxmodel =~ /lea-6t/){
+		$rxFamily = 6;
 	}
 }
 
@@ -283,7 +286,7 @@ LOOP: while (!$killed)
 				if ($fileFormat  == $OPENTTP){
 					printf OUT "%02x%02x $nowstr %s\n",$class,$id,(unpack "H*",(substr $data,0,$payloadLength+2));
 				}
-				if ($class == 0x01 && $id == 0x35){
+				if (($class == 0x01 && $id == 0x35) || ($rxFamily == 6 && $class == 0x01 && $id == 0x30)){
 					if (CheckSumOK($input)){
 						UpdateSVInfo($data);
 						UpdateStatus();
@@ -650,7 +653,7 @@ sub ConfigureReceiver
 
 	# Configure various messages for 1 Hz output
 
-	if ($Init{"receiver:model"} eq "LEA-6T"){
+	if ($rxFamily == 6){
 		Debug("Configuring RAW-RAW for a LEA-6T");
 		# RXM-RAW raw data message
 		$ubxmsgs .= "\x06\x01:";
@@ -670,7 +673,7 @@ sub ConfigureReceiver
 	$msg="\x06\x01\x03\x00\x0d\x01\x01"; #CFG-MSG 0x0d 0x01
 	SendCommand($msg);
 
-	if ($Init{"receiver:model"} eq "LEA-6T"){
+	if ($rxFamily == 6){
 		Debug("Configuring NAV-SVINFO for a LEA-6T");
 		# Satellite information
 		$ubxmsgs .= "\x01\x30:";
@@ -699,14 +702,13 @@ sub ConfigureReceiver
 		$ubxmsgs .= "\x0b\x02:"; # GPS UTC & ionosphere
 	}
 	$ubxmsgs .= "\x05\x00:\x05\01:"; # ACK-NAK, ACK_ACK
-	if ($Init{"receiver:model"} ne "LEA-6T"){
+	if ($rxFamily > 6){
 		$ubxmsgs .= "\x27\x03:"; # Chip ID
 	}
 
 	PollVersionInfo();
-	if ($Init{"receiver:model"} ne "LEA-6T"){
-		PollChipID();
-	}
+	PollChipID();
+
 	Debug("Done configuring");
 
 } # ConfigureReceiver
@@ -722,6 +724,9 @@ sub PollVersionInfo
 # ---------------------------------------------------------------------------
 sub PollChipID
 {
+	if ($rxFamily == 6){	# Not supported on ublox6 chips
+		return;
+	}
 	my $msg="\x27\x03\x00\x00";
 	SendCommand($msg);
 }
@@ -807,7 +812,7 @@ sub UpdateUTCIonoParameters
 # ---------------------------------------------------------------------------
 sub UpdateSVInfo
 {
-	# Uses 0x01 0x35 message
+	# Uses 0x01 0x35 or 0x01 0x30 (ublox6) messages
 	# This is used to track SVs as they appear and disappear so that we know
 	# when to request a new ephemeris
 	# Flags whether the list was updated
@@ -815,7 +820,7 @@ sub UpdateSVInfo
 	my $data=shift;
 	my $numSVs=(length($data)-8-2)/12;
 	my $i;
-	my ($cno,$azim,$prRes,$nowstr,$elev);
+	my ($cno,$azim,$prRes,$nowstr,$elev,$qual,$flagMask);
 	my $satsUpdated = 0;
 
 	# Mark all SVs as not visible so that non-visible SVs can be pruned
@@ -823,12 +828,28 @@ sub UpdateSVInfo
 		$SVdata[$i][$STILL_VISIBLE]=0;
 	}
 
-	#($iTOW,$ver,$numSVs) = unpack("ICC",$data);
+	if ($rxFamily == 6) {
+		($iTOW,$numSVs) = unpack("IC",$data);
+		$flagMask = 0x12;
+	}
+	else {
+		($iTOW,$ver,$numSVs) = unpack("ICC",$data);
+		$flagMask = 0x0800;
+	}
 	#Debug("numSVs = $numSVs");
 
 	for ($i=0;$i<$numSVs;$i++){
-		($gnssID,$svID,$cno,$elev,$azim,$prRes,$flags)=unpack("CCCcssI",substr $data,8+12*$i,12);
-		$ephAvail=$flags & 0x0800;
+		if ($rxFamily == 6) {
+			($gnssID,$svID,$flags,$qual,$cno,$elev,$azim,$prRes)=unpack("CCCCCssI",substr $data,8+12*$i,12);
+			$gnssID = 0;
+			if ($svID >= 120 && $svID <= 158) {
+				# SBAS satellites
+				$gnssID = 1;
+			}
+		} else {
+			($gnssID,$svID,$cno,$elev,$azim,$prRes,$flags)=unpack("CCCcssI",substr $data,8+12*$i,12);
+		}
+		$ephAvail=$flags & $flagMask;
 		next unless ($gnssID == 0); # only want GPS
 		# Debug("Checking $svID ($i)");
 		# If the SV is being tracked then no more to do
